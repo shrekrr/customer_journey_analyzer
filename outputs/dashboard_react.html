@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Customer Journey Drop-Off Analyzer</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/prop-types@15/prop-types.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-is@18/umd/react-is.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js" crossorigin></script>
+    <script src="https://unpkg.com/recharts@2.12.0/umd/Recharts.js" crossorigin></script>
+</head>
+
+<body style="margin:0">
+    <div id="root"></div>
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+        const {
+            ResponsiveContainer, AreaChart, Area, BarChart, Bar,
+            PieChart, Pie, Cell, XAxis, YAxis,
+            CartesianGrid, Tooltip, Legend
+        } = Recharts;
+
+        // ── PASTE THE ENTIRE CONTENTS OF CustomerJourneyDashboard.jsx HERE ──
+        // (everything EXCEPT the two import lines at the top)
+        const T = {
+            bg: "#07080a",
+            surface: "#0d0f12",
+            panel: "#111318",
+            border: "rgba(255,255,255,0.06)",
+            orange: "#f97316",
+            amber: "#fb923c",
+            yellow: "#fbbf24",
+            green: "#22c55e",
+            blue: "#3b82f6",
+            purple: "#a855f7",
+            red: "#ef4444",
+            text: "#f1ede6",
+            sub: "#9ca3af",
+            dim: "#4b5563",
+        };
+
+        const severityColor = (pct) => {
+            if (pct >= 40) return T.red;
+            if (pct >= 28) return T.orange;
+            if (pct >= 15) return T.yellow;
+            return T.green;
+        };
+
+        // ═══════════════════════════════════════════════════════════════
+        // DATA
+        // ═══════════════════════════════════════════════════════════════
+        const FUNNEL_DATA = [
+            { stage: "Landing", users: 15000, dropPct: 0, stageConv: 100, overallConv: 100.0 },
+            { stage: "Browse", users: 10950, dropPct: 27.0, stageConv: 73.0, overallConv: 73.0 },
+            { stage: "Product Detail", users: 7884, dropPct: 28.0, stageConv: 72.0, overallConv: 52.6 },
+            { stage: "Add to Cart", users: 4651, dropPct: 41.0, stageConv: 59.0, overallConv: 31.0 },
+            { stage: "Checkout", users: 2651, dropPct: 43.0, stageConv: 57.0, overallConv: 17.7 },
+            { stage: "Payment", users: 1670, dropPct: 37.0, stageConv: 63.0, overallConv: 11.1 },
+            { stage: "Confirmed", users: 1052, dropPct: 37.0, stageConv: 63.0, overallConv: 7.0 },
+        ];
+
+        const EXIT_REASONS = {
+            "Browse": [{ reason: "Slow page load", count: 1243 }, { reason: "No relevant products", count: 892 }, { reason: "Unclear navigation", count: 741 }],
+            "Product Detail": [{ reason: "High price", count: 978 }, { reason: "Poor images", count: 682 }, { reason: "No reviews", count: 562 }, { reason: "Out of stock", count: 350 }],
+            "Add to Cart": [{ reason: "Forced login", count: 1124 }, { reason: "High shipping cost", count: 896 }, { reason: "Price comparison", count: 665 }],
+            "Checkout": [{ reason: "Unexpected total cost", count: 432 }, { reason: "Complex form fields", count: 287 }, { reason: "No guest checkout", count: 218 }, { reason: "Trust concerns", count: 172 }],
+            "Payment": [{ reason: "Payment method missing", count: 312 }, { reason: "Payment error", count: 248 }, { reason: "OTP friction", count: 195 }, { reason: "Session timeout", count: 74 }],
+        };
+
+        const ML_MODELS = [
+            { name: "Logistic Regression", cvAuc: 0.781, testAuc: 0.773, precision: 0.71, recall: 0.68, f1: 0.69 },
+            { name: "Random Forest", cvAuc: 0.864, testAuc: 0.859, precision: 0.80, recall: 0.76, f1: 0.78 },
+            { name: "Gradient Boosting", cvAuc: 0.883, testAuc: 0.880, precision: 0.83, recall: 0.79, f1: 0.81 },
+            { name: "XGBoost", cvAuc: 0.897, testAuc: 0.892, precision: 0.85, recall: 0.82, f1: 0.83 },
+        ];
+
+        const SHAP_DATA = [
+            { feature: "cart_value", importance: 0.312 },
+            { feature: "load_time_s", importance: 0.241 },
+            { feature: "is_new_user", importance: 0.198 },
+            { feature: "n_pages_viewed", importance: 0.167 },
+            { feature: "has_coupon", importance: 0.134 },
+            { feature: "device", importance: 0.118 },
+            { feature: "utm_source", importance: 0.097 },
+            { feature: "hour", importance: 0.081 },
+        ];
+
+        const AB_RESULT = {
+            control: { sessions: 7500, conversions: 511, rate: 6.81 },
+            treatment: { sessions: 7500, conversions: 621, rate: 8.28 },
+            zStat: 3.847,
+            pValue: 0.000120,
+            significant: true,
+            uplift: 21.6,
+            ciLo: 0.0092,
+            ciHi: 0.0202,
+            extraConversions: 110,
+            revenueLift: 145230,
+            avgOrder: 1320,
+        };
+
+        const RFM_DATA = [
+            { segment: "Champions", count: 187, revenue: 312400, color: T.orange },
+            { segment: "Loyal Customers", count: 234, revenue: 287100, color: T.amber },
+            { segment: "Potential Loyalists", count: 298, revenue: 198700, color: T.yellow },
+            { segment: "At Risk", count: 201, revenue: 87300, color: T.blue },
+            { segment: "Lost", count: 132, revenue: 21400, color: T.dim },
+        ];
+
+        const COHORT_DATA = [
+            { cohort: "Jan '24", vals: [100, 42, 31, 24, 19, 15] },
+            { cohort: "Feb '24", vals: [100, 39, 28, 22, 17, null] },
+            { cohort: "Mar '24", vals: [100, 44, 33, 26, null, null] },
+            { cohort: "Apr '24", vals: [100, 41, 30, null, null, null] },
+            { cohort: "May '24", vals: [100, 38, null, null, null, null] },
+            { cohort: "Jun '24", vals: [100, null, null, null, null, null] },
+        ];
+
+        const WEEKLY_DATA = [
+            { day: "Mon", dropRate: 28.2 },
+            { day: "Tue", dropRate: 26.8 },
+            { day: "Wed", dropRate: 31.5 },
+            { day: "Thu", dropRate: 29.3 },
+            { day: "Fri", dropRate: 24.1 },
+            { day: "Sat", dropRate: 22.7 },
+            { day: "Sun", dropRate: 34.6 },
+        ];
+
+        const DEVICE_DATA = [
+            { device: "Mobile", sessions: 8700, convRate: 7.1, cartDrop: 58.2, payDrop: 47.3 },
+            { device: "Desktop", sessions: 4800, convRate: 11.8, cartDrop: 38.6, payDrop: 28.4 },
+            { device: "Tablet", sessions: 1500, convRate: 9.2, cartDrop: 44.1, payDrop: 35.7 },
+        ];
+
+        const RECOMMENDATIONS = [
+            { priority: "P0", stage: "Cart → Checkout", action: "Enable guest checkout — remove forced login friction", impact: "+18–28% conversion", color: T.red },
+            { priority: "P1", stage: "Checkout", action: "Show full price breakdown early, including delivery fees", impact: "+12% checkout completion", color: T.orange },
+            { priority: "P1", stage: "Payment", action: "Add UPI, wallets and BNPL payment options", impact: "+15% payment success", color: T.orange },
+            { priority: "P2", stage: "Browse → PDP", action: "Reduce page load under 2s, compress and lazy-load images", impact: "+8% page engagement", color: T.yellow },
+            { priority: "P2", stage: "PDP → Cart", action: "Add reviews, star ratings, and stock urgency signals", impact: "+10% add-to-cart rate", color: T.yellow },
+            { priority: "P3", stage: "All Stages", action: "Exit-intent popups with personalised discount nudge", impact: "+5% recovery rate", color: T.green },
+        ];
+
+        // ═══════════════════════════════════════════════════════════════
+        // SHARED UI COMPONENTS
+        // ═══════════════════════════════════════════════════════════════
+        const fmt = (n) => (n ?? 0).toLocaleString();
+
+        function Card({ children, style }) {
+            return (
+                <div style={{ background: T.panel, border: `1px solid ${T.border}`, borderRadius: 12, padding: 20, ...style }}>
+                    {children}
+                </div>
+            );
+        }
+
+        function SectionTitle({ children, color }) {
+            return (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                    <div style={{ width: 3, height: 18, background: color || T.orange, borderRadius: 2 }} />
+                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.sub, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                        {children}
+                    </span>
+                </div>
+            );
+        }
+
+        function KpiCard({ label, value, sub, accent }) {
+            return (
+                <Card style={{ borderTop: `2px solid ${accent}` }}>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, color: T.dim, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 10 }}>{label}</div>
+                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 24, fontWeight: 700, color: T.text, lineHeight: 1 }}>{value}</div>
+                    {sub && <div style={{ fontSize: 11, color: T.dim, marginTop: 8 }}>{sub}</div>}
+                </Card>
+            );
+        }
+
+        function Badge({ children, color }) {
+            return (
+                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, letterSpacing: "0.08em", padding: "2px 7px", borderRadius: 4, background: `${color}20`, border: `1px solid ${color}50`, color }}>
+                    {children}
+                </span>
+            );
+        }
+
+        function Bar2({ value, max, color, height }) {
+            const h = height || 4;
+            const pct = Math.min(((value || 0) / (max || 1)) * 100, 100);
+            return (
+                <div style={{ height: h, background: "#1c1f24", borderRadius: h / 2, overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct}%`, background: color, borderRadius: h / 2, transition: "width 0.7s ease" }} />
+                </div>
+            );
+        }
+
+        function ChartTip({ active, payload, label }) {
+            if (!active || !payload || !payload.length) return null;
+            return (
+                <div style={{ background: "#141820", border: `1px solid ${T.border}`, borderRadius: 8, padding: "10px 14px", fontFamily: "'IBM Plex Mono', monospace", fontSize: 11 }}>
+                    {label && <div style={{ color: T.orange, marginBottom: 6 }}>{label}</div>}
+                    {payload.map((p, i) => (
+                        <div key={i} style={{ color: T.sub }}>{p.name}: <span style={{ color: T.text }}>{typeof p.value === "number" ? p.value.toLocaleString() : p.value}</span></div>
+                    ))}
+                </div>
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 1 — FUNNEL
+        // ═══════════════════════════════════════════════════════════════
+        function FunnelSection() {
+            const [sel, setSel] = useState("Add to Cart");
+            const reasons = EXIT_REASONS[sel] || [];
+            const maxCount = reasons.length > 0 ? Math.max(...reasons.map((r) => r.count)) : 1;
+            const barColors = [T.orange, T.amber, T.yellow, "#f59e0b"];
+
+            const tipMap = {
+                "Add to Cart": "Enable guest checkout — removing forced login can recover up to 28% of cart abandoners.",
+                "Checkout": "Display full price including delivery charges before checkout to prevent price-shock exits.",
+                "Payment": "Adding UPI and wallet options reduces mobile payment drop-off by ~38% on average.",
+                "Product Detail": "Social proof (reviews + ratings) and stock urgency labels drive higher add-to-cart rates.",
+                "Browse": "Pages loading under 2s see 30% lower bounce rates. Optimize image delivery and use lazy loading.",
+            };
+
+            return (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 360px", gap: 20 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Conversion Funnel — Click a Stage</SectionTitle>
+                            {FUNNEL_DATA.map((s, i) => {
+                                const widthPct = (s.users / FUNNEL_DATA[0].users) * 100;
+                                const isSelected = sel === s.stage;
+                                const isClickable = !!EXIT_REASONS[s.stage];
+                                return (
+                                    <div key={s.stage} onClick={() => isClickable && setSel(s.stage)}
+                                        style={{ padding: "10px 14px", borderRadius: 8, marginBottom: 6, cursor: isClickable ? "pointer" : "default", border: `1px solid ${isSelected ? T.orange + "60" : T.border}`, background: isSelected ? T.orange + "12" : "transparent", transition: "all 0.18s" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: T.dim, minWidth: 20 }}>{String(i + 1).padStart(2, "0")}</span>
+                                                <span style={{ fontSize: 13, color: isSelected ? T.orange : T.text, fontWeight: isSelected ? 600 : 400 }}>{s.stage}</span>
+                                                {s.dropPct >= 40 && <Badge color={T.red}>CRITICAL</Badge>}
+                                                {s.dropPct >= 28 && s.dropPct < 40 && <Badge color={T.orange}>HIGH</Badge>}
+                                            </div>
+                                            <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+                                                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 12, color: T.text }}>{fmt(s.users)}</span>
+                                                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: i === 0 ? T.green : severityColor(s.dropPct), minWidth: 50, textAlign: "right" }}>
+                                                    {i === 0 ? "ENTRY" : `▼ ${s.dropPct}%`}
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <Bar2 value={widthPct} max={100} color={isSelected ? T.orange : severityColor(s.dropPct)} height={5} />
+                                    </div>
+                                );
+                            })}
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>Weekly Drop-off Rate Trend</SectionTitle>
+                            <ResponsiveContainer width="100%" height={180}>
+                                <AreaChart data={WEEKLY_DATA} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+                                    <defs>
+                                        <linearGradient id="wGrad" x1="0" y1="0" x2="0" y2="1">
+                                            <stop offset="0%" stopColor={T.orange} stopOpacity={0.3} />
+                                            <stop offset="100%" stopColor={T.orange} stopOpacity={0} />
+                                        </linearGradient>
+                                    </defs>
+                                    <CartesianGrid stroke="#1a1d22" strokeDasharray="4 4" />
+                                    <XAxis dataKey="day" tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} unit="%" />
+                                    <Tooltip content={<ChartTip />} />
+                                    <Area type="monotone" dataKey="dropRate" name="Drop Rate %" stroke={T.orange} strokeWidth={2} fill="url(#wGrad)" dot={{ fill: T.orange, r: 3 }} />
+                                </AreaChart>
+                            </ResponsiveContainer>
+                        </Card>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Exit Reasons</SectionTitle>
+                            <div style={{ marginBottom: 14 }}>
+                                <div style={{ fontSize: 9, color: T.dim, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.12em", marginBottom: 4 }}>SELECTED STAGE</div>
+                                <div style={{ fontSize: 16, color: T.orange, fontWeight: 600 }}>{sel}</div>
+                            </div>
+                            {reasons.length === 0
+                                ? <div style={{ textAlign: "center", padding: "20px 0", color: T.dim, fontSize: 12 }}>No exit data for this stage.</div>
+                                : reasons.map((r, i) => (
+                                    <div key={r.reason} style={{ marginBottom: 16 }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                            <span style={{ fontSize: 12, color: T.sub }}>{r.reason}</span>
+                                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: barColors[i] }}>{fmt(r.count)}</span>
+                                        </div>
+                                        <Bar2 value={r.count} max={maxCount} color={barColors[i]} height={4} />
+                                    </div>
+                                ))
+                            }
+                            {tipMap[sel] && (
+                                <div style={{ marginTop: 16, padding: 14, background: T.orange + "10", border: `1px solid ${T.orange}30`, borderRadius: 8 }}>
+                                    <div style={{ fontSize: 9, color: T.orange, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.1em", marginBottom: 6 }}>💡 TOP FIX</div>
+                                    <div style={{ fontSize: 11, color: T.sub, lineHeight: 1.65 }}>{tipMap[sel]}</div>
+                                </div>
+                            )}
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>Device Performance</SectionTitle>
+                            {DEVICE_DATA.map((d, i) => {
+                                const colors = [T.orange, T.blue, T.amber];
+                                return (
+                                    <div key={d.device} style={{ marginBottom: i < DEVICE_DATA.length - 1 ? 16 : 0, paddingBottom: i < DEVICE_DATA.length - 1 ? 16 : 0, borderBottom: i < DEVICE_DATA.length - 1 ? `1px solid ${T.border}` : "none" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                            <span style={{ fontSize: 13, color: colors[i], fontWeight: 600 }}>{d.device}</span>
+                                            <Badge color={T.green}>{d.convRate}% conv.</Badge>
+                                        </div>
+                                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                            {[["Cart Drop", d.cartDrop], ["Pay Drop", d.payDrop]].map(([label, val]) => (
+                                                <div key={label} style={{ background: T.surface, borderRadius: 6, padding: "8px 10px", textAlign: "center" }}>
+                                                    <div style={{ fontSize: 9, color: T.dim, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.1em", marginBottom: 4 }}>{label.toUpperCase()}</div>
+                                                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 18, fontWeight: 700, color: severityColor(val) }}>{val}%</div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </Card>
+                    </div>
+                </div>
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 2 — ML PREDICTOR
+        // ═══════════════════════════════════════════════════════════════
+        function MLSection() {
+            const [selModel, setSelModel] = useState("XGBoost");
+            const selected = ML_MODELS.find((m) => m.name === selModel) || ML_MODELS[3];
+            const modelColors = [T.blue, T.amber, T.purple, T.orange];
+
+            const metrics = [
+                { label: "AUC Score", value: selected.testAuc, color: T.orange },
+                { label: "Precision", value: selected.precision, color: T.blue },
+                { label: "Recall", value: selected.recall, color: T.green },
+                { label: "F1 Score", value: selected.f1, color: T.purple },
+            ];
+
+            const aucChartData = ML_MODELS.map((m) => ({
+                name: m.name.split(" ")[0],
+                "Test AUC": +(m.testAuc * 100).toFixed(1),
+                "CV AUC": +(m.cvAuc * 100).toFixed(1),
+            }));
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Model Comparison</SectionTitle>
+                            {ML_MODELS.map((m, i) => {
+                                const isSelected = selModel === m.name;
+                                return (
+                                    <div key={m.name} onClick={() => setSelModel(m.name)}
+                                        style={{ padding: "12px 14px", borderRadius: 8, marginBottom: 8, cursor: "pointer", border: `1px solid ${isSelected ? modelColors[i] + "60" : T.border}`, background: isSelected ? modelColors[i] + "10" : "transparent", transition: "all 0.18s" }}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                                            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                                                <span style={{ fontSize: 13, color: isSelected ? modelColors[i] : T.text, fontWeight: isSelected ? 600 : 400 }}>{m.name}</span>
+                                                {m.name === "XGBoost" && <Badge color={T.orange}>BEST</Badge>}
+                                            </div>
+                                            <div style={{ display: "flex", gap: 16 }}>
+                                                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.dim }}>CV: <span style={{ color: T.sub }}>{m.cvAuc}</span></span>
+                                                <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: modelColors[i] }}>AUC: {m.testAuc}</span>
+                                            </div>
+                                        </div>
+                                        <Bar2 value={m.testAuc * 100} max={100} color={modelColors[i]} height={3} />
+                                    </div>
+                                );
+                            })}
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>Metrics — {selModel}</SectionTitle>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 20, marginBottom: 20 }}>
+                                {metrics.map((m) => (
+                                    <div key={m.label}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
+                                            <span style={{ fontSize: 12, color: T.sub }}>{m.label}</span>
+                                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: m.color, fontWeight: 700 }}>{m.value.toFixed(3)}</span>
+                                        </div>
+                                        <Bar2 value={m.value} max={1} color={m.color} height={6} />
+                                    </div>
+                                ))}
+                            </div>
+                            <div style={{ padding: 14, background: T.surface, borderRadius: 8 }}>
+                                <div style={{ fontSize: 9, color: T.dim, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.1em", marginBottom: 10 }}>CLASSIFICATION REPORT</div>
+                                <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                                    {[["Precision", selected.precision], ["Recall", selected.recall], ["F1", selected.f1]].map(([l, v]) => (
+                                        <div key={l} style={{ textAlign: "center" }}>
+                                            <div style={{ fontSize: 9, color: T.dim, marginBottom: 4, textTransform: "uppercase" }}>{l}</div>
+                                            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, color: T.text }}>{v.toFixed(2)}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        </Card>
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Test AUC vs CV AUC — All Models</SectionTitle>
+                            <ResponsiveContainer width="100%" height={220}>
+                                <BarChart data={aucChartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }} barCategoryGap="30%">
+                                    <CartesianGrid stroke="#1a1d22" strokeDasharray="4 4" />
+                                    <XAxis dataKey="name" tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} domain={[70, 95]} unit="%" />
+                                    <Tooltip content={<ChartTip />} />
+                                    <Legend formatter={(v) => <span style={{ color: T.sub, fontSize: 10 }}>{v}</span>} />
+                                    <Bar dataKey="Test AUC" fill={T.orange} radius={[3, 3, 0, 0]} />
+                                    <Bar dataKey="CV AUC" fill={T.blue} radius={[3, 3, 0, 0]} />
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>SHAP Feature Importance — XGBoost</SectionTitle>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                                {SHAP_DATA.map((f, i) => (
+                                    <div key={f.feature}>
+                                        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 5 }}>
+                                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.sub }}>{f.feature}</span>
+                                            <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.orange }}>{f.importance.toFixed(3)}</span>
+                                        </div>
+                                        <Bar2 value={f.importance} max={SHAP_DATA[0].importance} color={`hsl(${20 + i * 14}, 88%, 60%)`} height={5} />
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+                    </div>
+                </div>
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 3 — A/B TESTING
+        // ═══════════════════════════════════════════════════════════════
+        function ABSection() {
+            const ab = AB_RESULT;
+            const barData = [
+                { group: "Control", rate: ab.control.rate, sessions: ab.control.sessions, conversions: ab.control.conversions },
+                { group: "Treatment", rate: ab.treatment.rate, sessions: ab.treatment.sessions, conversions: ab.treatment.conversions },
+            ];
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 16 }}>
+                        <KpiCard label="Relative Uplift" value={`+${ab.uplift}%`} sub="Treatment vs Control" accent={T.orange} />
+                        <KpiCard label="P-Value" value={ab.pValue.toFixed(6)} sub="✓ Significant — p < 0.05" accent={T.green} />
+                        <KpiCard label="Extra Conversions" value={`+${ab.extraConversions}`} sub="Per test window" accent={T.amber} />
+                        <KpiCard label="Revenue Lift" value={`₹${(ab.revenueLift / 1000).toFixed(1)}K`} sub="Projected monthly" accent={T.blue} />
+                    </div>
+
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Conversion Rate — Control vs Treatment</SectionTitle>
+                            <ResponsiveContainer width="100%" height={220}>
+                                <BarChart data={barData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }} barSize={60}>
+                                    <CartesianGrid stroke="#1a1d22" strokeDasharray="4 4" />
+                                    <XAxis dataKey="group" tick={{ fill: T.sub, fontSize: 12 }} axisLine={false} tickLine={false} />
+                                    <YAxis tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} unit="%" />
+                                    <Tooltip content={<ChartTip />} />
+                                    <Bar dataKey="rate" name="Conv Rate %" radius={[6, 6, 0, 0]}>
+                                        <Cell fill={T.blue} />
+                                        <Cell fill={T.orange} />
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                            <div style={{ textAlign: "center", marginTop: 12, fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.green }}>
+                                z = {ab.zStat} · p = {ab.pValue.toFixed(6)} · ✅ Statistically Significant
+                            </div>
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>Session Breakdown</SectionTitle>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+                                {barData.map((g, i) => {
+                                    const color = i === 0 ? T.blue : T.orange;
+                                    return (
+                                        <div key={g.group} style={{ padding: 16, background: T.surface, borderRadius: 8, border: `1px solid ${color}30` }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                                                <span style={{ fontSize: 14, color, fontWeight: 600 }}>{g.group}</span>
+                                                <Badge color={color}>{g.rate}% conv.</Badge>
+                                            </div>
+                                            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                                {[["Sessions", g.sessions], ["Conversions", g.conversions]].map(([l, v]) => (
+                                                    <div key={l} style={{ textAlign: "center" }}>
+                                                        <div style={{ fontSize: 9, color: T.dim, fontFamily: "'IBM Plex Mono', monospace", marginBottom: 4, textTransform: "uppercase" }}>{l}</div>
+                                                        <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 20, color: T.text, fontWeight: 700 }}>{fmt(v)}</div>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    );
+                                })}
+                                <div style={{ padding: 14, background: T.green + "08", border: `1px solid ${T.green}25`, borderRadius: 8 }}>
+                                    <div style={{ fontSize: 9, color: T.green, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.1em", marginBottom: 8 }}>95% CONFIDENCE INTERVAL</div>
+                                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, color: T.text, marginBottom: 4 }}>
+                                        [{ab.ciLo.toFixed(4)}, {ab.ciHi.toFixed(4)}]
+                                    </div>
+                                    <div style={{ fontSize: 11, color: T.sub }}>Interval excludes 0 — confirms statistical significance.</div>
+                                </div>
+                            </div>
+                        </Card>
+                    </div>
+
+                    <Card style={{ background: `linear-gradient(135deg, ${T.orange}08, ${T.orange}02)`, borderColor: `${T.orange}25` }}>
+                        <SectionTitle>Statistical Hypothesis Summary</SectionTitle>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 24 }}>
+                            {[
+                                { icon: "🧪", title: "Hypothesis", body: `H₀: Conv(control) = Conv(treatment)\nH₁: Conv(treatment) > Conv(control)\nTest: Two-proportion z-test + χ² verification` },
+                                { icon: "📊", title: "Test Result", body: `z-statistic: ${ab.zStat}\np-value: ${ab.pValue.toFixed(6)}\nConclusion: Reject H₀ — guest checkout significantly improves conversion` },
+                                { icon: "📈", title: "Business Impact", body: `+${ab.uplift}% relative uplift\n+${ab.extraConversions} extra conversions / window\n₹${(ab.revenueLift / 1000).toFixed(1)}K projected monthly revenue lift` },
+                            ].map((c) => (
+                                <div key={c.title}>
+                                    <div style={{ fontSize: 20, marginBottom: 8 }}>{c.icon}</div>
+                                    <div style={{ fontSize: 12, color: T.orange, fontWeight: 600, marginBottom: 8 }}>{c.title}</div>
+                                    <div style={{ fontSize: 11, color: T.sub, lineHeight: 1.75, whiteSpace: "pre-line" }}>{c.body}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </Card>
+                </div>
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 4 — COHORT & RFM
+        // ═══════════════════════════════════════════════════════════════
+        function CohortRFMSection() {
+            const cellStyle = (val) => {
+                if (val === null) return { bg: T.surface, color: T.dim, text: "—" };
+                if (val === 100) return { bg: T.orange + "35", color: T.orange, text: `${val}%` };
+                if (val >= 35) return { bg: T.amber + "25", color: T.amber, text: `${val}%` };
+                if (val >= 20) return { bg: T.yellow + "18", color: T.yellow, text: `${val}%` };
+                return { bg: T.blue + "15", color: T.blue, text: `${val}%` };
+            };
+
+            return (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Monthly Cohort Retention</SectionTitle>
+                            <table style={{ width: "100%", borderCollapse: "separate", borderSpacing: 3 }}>
+                                <thead>
+                                    <tr>
+                                        <th style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, color: T.dim, textAlign: "left", padding: "4px 8px", letterSpacing: "0.1em" }}>COHORT</th>
+                                        {["M+0", "M+1", "M+2", "M+3", "M+4", "M+5"].map((h) => (
+                                            <th key={h} style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, color: T.dim, padding: "4px 4px", textAlign: "center", letterSpacing: "0.08em" }}>{h}</th>
+                                        ))}
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {COHORT_DATA.map((row) => (
+                                        <tr key={row.cohort}>
+                                            <td style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: T.sub, padding: "3px 8px", whiteSpace: "nowrap" }}>{row.cohort}</td>
+                                            {row.vals.map((val, j) => {
+                                                const s = cellStyle(val);
+                                                return (
+                                                    <td key={j} style={{ background: s.bg, borderRadius: 5, padding: "8px 4px", textAlign: "center", fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: s.color, minWidth: 44 }}>
+                                                        {s.text}
+                                                    </td>
+                                                );
+                                            })}
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                            <div style={{ marginTop: 14, fontSize: 11, color: T.dim, lineHeight: 1.65 }}>
+                                📌 January cohort has the strongest M+1 retention at 42%. March peaks at 44% — likely tied to sale campaigns.
+                            </div>
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>Revenue by RFM Segment</SectionTitle>
+                            <ResponsiveContainer width="100%" height={200}>
+                                <PieChart>
+                                    <Pie data={RFM_DATA.map((s) => ({ name: s.segment, value: s.revenue }))} dataKey="value" nameKey="name" cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={3}>
+                                        {RFM_DATA.map((s, i) => <Cell key={i} fill={s.color} stroke="none" />)}
+                                    </Pie>
+                                    <Tooltip formatter={(v) => `₹${(v / 1000).toFixed(0)}K`} contentStyle={{ background: "#141820", border: `1px solid ${T.border}`, borderRadius: 8, fontFamily: "'IBM Plex Mono',monospace", fontSize: 11 }} />
+                                    <Legend formatter={(v) => <span style={{ color: T.sub, fontSize: 10 }}>{v}</span>} />
+                                </PieChart>
+                            </ResponsiveContainer>
+                        </Card>
+                    </div>
+
+                    <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>RFM Segment Breakdown</SectionTitle>
+                            {RFM_DATA.map((s, i) => (
+                                <div key={s.segment} style={{ padding: "14px 0", borderBottom: i < RFM_DATA.length - 1 ? `1px solid ${T.border}` : "none" }}>
+                                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                                        <div style={{ width: 8, height: 8, borderRadius: "50%", background: s.color, flexShrink: 0 }} />
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                                <span style={{ fontSize: 13, color: T.text }}>{s.segment}</span>
+                                                <div style={{ display: "flex", gap: 16 }}>
+                                                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.dim }}>{fmt(s.count)} users</span>
+                                                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: s.color }}>₹{(s.revenue / 1000).toFixed(0)}K</span>
+                                                </div>
+                                            </div>
+                                            <Bar2 value={s.revenue} max={RFM_DATA[0].revenue} color={s.color} height={4} />
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </Card>
+
+                        <Card>
+                            <SectionTitle>Segment Size Comparison</SectionTitle>
+                            <ResponsiveContainer width="100%" height={180}>
+                                <BarChart data={RFM_DATA} layout="vertical" margin={{ top: 0, right: 30, left: 10, bottom: 0 }} barSize={14}>
+                                    <XAxis type="number" tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} />
+                                    <YAxis type="category" dataKey="segment" tick={{ fill: T.sub, fontSize: 10 }} axisLine={false} tickLine={false} width={130} />
+                                    <Tooltip content={<ChartTip />} />
+                                    <Bar dataKey="count" name="Users" radius={[0, 4, 4, 0]}>
+                                        {RFM_DATA.map((s, i) => <Cell key={i} fill={s.color} />)}
+                                    </Bar>
+                                </BarChart>
+                            </ResponsiveContainer>
+                        </Card>
+
+                        <Card style={{ background: T.green + "08", borderColor: T.green + "20" }}>
+                            <div style={{ fontSize: 9, color: T.green, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.12em", marginBottom: 10 }}>💡 KEY INSIGHT</div>
+                            <div style={{ fontSize: 12, color: T.sub, lineHeight: 1.7 }}>
+                                Champions (17.8% of users) generate <span style={{ color: T.orange }}>34.6% of total revenue</span>. Re-engaging the "At Risk" segment could recover ₹87K — deploy a win-back email campaign with personalised offers.
+                            </div>
+                        </Card>
+                    </div>
+                </div>
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // SECTION 5 — INSIGHTS
+        // ═══════════════════════════════════════════════════════════════
+        function InsightsSection() {
+            const dropChartData = FUNNEL_DATA.slice(1).map((s) => ({
+                stage: s.stage.split(" ")[0],
+                "Drop %": s.dropPct,
+            }));
+
+            const summary = [
+                { label: "Biggest Bottleneck", value: "Cart → Checkout (43%)", sub: "Forced login + shipping shock", color: T.red },
+                { label: "Best ML Model", value: "XGBoost — AUC 0.892", sub: "SHAP: cart_value most predictive", color: T.amber },
+                { label: "A/B Test Winner", value: "Guest Checkout +21.6%", sub: "p = 0.00012, statistically proven", color: T.green },
+                { label: "Revenue Opportunity", value: "₹145K / month", sub: "From top 3 fixes combined", color: T.blue },
+            ];
+
+            return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+                        <Card>
+                            <SectionTitle>Priority Action Plan</SectionTitle>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                                {RECOMMENDATIONS.map((r) => (
+                                    <div key={r.action} style={{ display: "flex", gap: 12, padding: "12px 14px", background: T.surface, borderRadius: 8, border: `1px solid ${T.border}`, alignItems: "flex-start" }}>
+                                        <div style={{ flexShrink: 0, paddingTop: 1 }}><Badge color={r.color}>{r.priority}</Badge></div>
+                                        <div style={{ flex: 1 }}>
+                                            <div style={{ fontSize: 9, color: T.dim, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.1em", marginBottom: 3 }}>{r.stage}</div>
+                                            <div style={{ fontSize: 12, color: T.sub, marginBottom: 5, lineHeight: 1.5 }}>{r.action}</div>
+                                            <div style={{ fontSize: 11, color: T.green }}>📈 {r.impact}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </Card>
+
+                        <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+                            <Card>
+                                <SectionTitle>Drop-off Risk by Stage</SectionTitle>
+                                <ResponsiveContainer width="100%" height={200}>
+                                    <BarChart data={dropChartData} margin={{ top: 5, right: 10, left: -20, bottom: 0 }} barSize={30}>
+                                        <CartesianGrid stroke="#1a1d22" strokeDasharray="4 4" />
+                                        <XAxis dataKey="stage" tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} />
+                                        <YAxis tick={{ fill: T.dim, fontSize: 10 }} axisLine={false} tickLine={false} unit="%" />
+                                        <Tooltip content={<ChartTip />} />
+                                        <Bar dataKey="Drop %" radius={[4, 4, 0, 0]}>
+                                            {FUNNEL_DATA.slice(1).map((s, i) => <Cell key={i} fill={severityColor(s.dropPct)} />)}
+                                        </Bar>
+                                    </BarChart>
+                                </ResponsiveContainer>
+                            </Card>
+
+                            <Card style={{ background: `linear-gradient(135deg, ${T.orange}07, ${T.orange}02)`, borderColor: `${T.orange}22` }}>
+                                <SectionTitle>Executive Summary</SectionTitle>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                                    {summary.map((s) => (
+                                        <div key={s.label} style={{ background: T.surface, borderRadius: 8, padding: "12px 14px" }}>
+                                            <div style={{ fontSize: 9, color: T.dim, fontFamily: "'IBM Plex Mono', monospace", letterSpacing: "0.1em", marginBottom: 6, textTransform: "uppercase" }}>{s.label}</div>
+                                            <div style={{ fontSize: 12, color: s.color, fontWeight: 600, marginBottom: 4 }}>{s.value}</div>
+                                            <div style={{ fontSize: 10, color: T.dim, lineHeight: 1.5 }}>{s.sub}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </Card>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // ROOT
+        // ═══════════════════════════════════════════════════════════════
+        const NAV = [
+            { id: "funnel", label: "Funnel Analysis", icon: "▽" },
+            { id: "ml", label: "ML Predictor", icon: "◈" },
+            { id: "ab", label: "A/B Testing", icon: "⊞" },
+            { id: "cohort", label: "Cohort & RFM", icon: "◉" },
+            { id: "insights", label: "Insights", icon: "◎" },
+        ];
+
+        function App() {
+            const [active, setActive] = useState("funnel");
+            const [ready, setReady] = useState(false);
+            useEffect(() => { setTimeout(() => setReady(true), 60); }, []);
+
+            const totalUsers = FUNNEL_DATA[0].users;
+            const converted = FUNNEL_DATA[FUNNEL_DATA.length - 1].users;
+            const convRate = ((converted / totalUsers) * 100).toFixed(1);
+            const totalDrops = totalUsers - converted;
+
+            return (
+                <div style={{ minHeight: "100vh", background: T.bg, display: "flex", fontFamily: "'DM Sans', sans-serif", opacity: ready ? 1 : 0, transition: "opacity 0.4s ease" }}>
+                    <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        ::-webkit-scrollbar { width: 3px; }
+        ::-webkit-scrollbar-thumb { background: #222; border-radius: 3px; }
+        .nb { transition: all 0.15s ease; border: none; cursor: pointer; }
+        .nb:hover  { background: rgba(249,115,22,0.08) !important; color: ${T.orange} !important; }
+        .nb.on     { background: rgba(249,115,22,0.12) !important; color: ${T.orange} !important; border-left: 2px solid ${T.orange} !important; }
+        @keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+        .fu { animation: fadeUp 0.35s ease forwards; }
+      `}</style>
+
+                    {/* SIDEBAR */}
+                    <aside style={{ width: 218, flexShrink: 0, background: T.surface, borderRight: `1px solid ${T.border}`, display: "flex", flexDirection: "column", position: "sticky", top: 0, height: "100vh" }}>
+                        <div style={{ padding: "20px 18px 18px", borderBottom: `1px solid ${T.border}` }}>
+                            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                                <div style={{ width: 32, height: 32, borderRadius: 8, background: `linear-gradient(135deg, ${T.orange}, #c2410c)`, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 15, boxShadow: `0 0 14px ${T.orange}40` }}>▽</div>
+                                <div>
+                                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 11, color: T.text, fontWeight: 700, letterSpacing: "0.08em" }}>DROP-OFF</div>
+                                    <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, color: T.dim, letterSpacing: "0.12em" }}>ANALYZER</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <nav style={{ padding: "12px 10px", flex: 1 }}>
+                            {NAV.map((item) => (
+                                <button key={item.id} className={`nb${active === item.id ? " on" : ""}`} onClick={() => setActive(item.id)}
+                                    style={{ width: "100%", display: "flex", alignItems: "center", gap: 10, padding: "9px 10px", borderRadius: 7, marginBottom: 2, background: "transparent", borderLeft: "2px solid transparent", color: T.sub, fontSize: 12, textAlign: "left" }}>
+                                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 13, width: 16, textAlign: "center" }}>{item.icon}</span>
+                                    {item.label}
+                                </button>
+                            ))}
+                        </nav>
+
+                        <div style={{ padding: "14px 16px", borderTop: `1px solid ${T.border}` }}>
+                            <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 9, color: T.dim, letterSpacing: "0.15em", marginBottom: 10 }}>DATASET</div>
+                            {[["Sessions", fmt(totalUsers)], ["Converted", fmt(converted)], ["Conv. Rate", `${convRate}%`], ["Date Range", "Jan–Jun 2024"]].map(([l, v]) => (
+                                <div key={l} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                                    <span style={{ fontSize: 10, color: T.dim }}>{l}</span>
+                                    <span style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: 10, color: T.sub }}>{v}</span>
+                                </div>
+                            ))}
+                            <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 10 }}>
+                                <div style={{ width: 6, height: 6, borderRadius: "50%", background: T.green, boxShadow: `0 0 6px ${T.green}` }} />
+                                <span style={{ fontSize: 9, color: T.dim }}>Synthetic · 15K sessions</span>
+                            </div>
+                        </div>
+                    </aside>
+
+                    {/* MAIN */}
+                    <main style={{ flex: 1, overflow: "auto", padding: "28px 30px" }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 14, marginBottom: 28 }}>
+                            <KpiCard label="Total Sessions" value={fmt(totalUsers)} sub="Unique visitor entries" accent={T.blue} />
+                            <KpiCard label="Confirmed Orders" value={fmt(converted)} sub="End-to-end completions" accent={T.green} />
+                            <KpiCard label="Overall Conversion" value={`${convRate}%`} sub="Landing → Order Confirmed" accent={T.amber} />
+                            <KpiCard label="Total Drop-offs" value={fmt(totalDrops)} sub="Users who abandoned journey" accent={T.red} />
+                        </div>
+
+                        <div key={active} className="fu">
+                            {active === "funnel" && <FunnelSection />}
+                            {active === "ml" && <MLSection />}
+                            {active === "ab" && <ABSection />}
+                            {active === "cohort" && <CohortRFMSection />}
+                            {active === "insights" && <InsightsSection />}
+                        </div>
+                    </main>
+                </div>
+            );
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,8 @@
+stage,users,drop_off,drop_off_pct,stage_conv_pct,overall_conv
+landing,15000,0.0,0.0,0.0,100.0
+browse,10413,4587.0,30.58,69.42,69.42
+product_detail,7053,3360.0,32.27,67.73,47.02
+add_to_cart,3934,3119.0,44.22,55.78,26.23
+checkout,2101,1833.0,46.59,53.41,14.01
+payment,1269,832.0,39.6,60.4,8.46
+order_confirmed,744,525.0,41.37,58.63,4.96
